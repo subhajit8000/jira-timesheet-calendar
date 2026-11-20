@@ -132,14 +132,12 @@ export function createApp({
       reviews.set(reviewId, { review, expiresAt, state: 'ready' });
       res.json({ ...review, reviewId, expiresAt });
     } catch (error) {
-      res
-        .status(error instanceof ReportError ? error.status : 502)
-        .json({
-          error:
-            error instanceof ReportError
-              ? error.message
-              : 'Could not review this work log. No entry was submitted.',
-        });
+      res.status(error instanceof ReportError ? error.status : 502).json({
+        error:
+          error instanceof ReportError
+            ? error.message
+            : 'Could not review this work log. No entry was submitted.',
+      });
     } finally {
       activePreviews -= 1;
     }
@@ -155,12 +153,10 @@ export function createApp({
       !record ||
       (record.state === 'ready' && record.expiresAt <= Date.now())
     ) {
-      return res
-        .status(410)
-        .json({
-          error:
-            'This review expired or the server restarted. Check Jira before starting a new review.',
-        });
+      return res.status(410).json({
+        error:
+          'This review expired or the server restarted. Check Jira before starting a new review.',
+      });
     }
     const mutation = ['update', 'delete'].includes(record.review.action);
     if (
@@ -168,23 +164,19 @@ export function createApp({
         ? req.body.action !== record.review.action
         : req.body.duplicateCheckAcknowledged !== true
     ) {
-      return res
-        .status(400)
-        .json({
-          error: 'Confirm the reviewed action and any duplicate warning.',
-        });
+      return res.status(400).json({
+        error: 'Confirm the reviewed action and any duplicate warning.',
+      });
     }
     if (record.state === 'ready') {
       const mutationKey = mutation
         ? `${record.review.issueId}:${record.review.worklogId}`
         : null;
       if (mutationKey && activeMutations.has(mutationKey)) {
-        return res
-          .status(409)
-          .json({
-            error:
-              'Another change to this entry is in progress. Check Jira and refresh before trying again.',
-          });
+        return res.status(409).json({
+          error:
+            'Another change to this entry is in progress. Check Jira and refresh before trying again.',
+        });
       }
       if (mutationKey) activeMutations.add(mutationKey);
       record.state = 'saving';
