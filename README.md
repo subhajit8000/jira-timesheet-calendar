@@ -1,4 +1,4 @@
-# Jira Timesheet Calendar
+gh auth login# Jira Timesheet Calendar
 
 A personal calendar with reviewed work-log submission for https://paragon-automation.atlassian.net.
 React, FullCalendar Standard (free), and a local Node.js server. No Marketplace app, database, telemetry, or external frontend CDN.
@@ -34,9 +34,9 @@ Only create a token if your organization permits it. Do not share credentials in
 2. Prefer **Create API token with scopes**, select Jira, and grant classic scopes `read:jira-work` and `read:jira-user`. To save work logs, also include `write:jira-work`; a read-only token still supports viewing reports. No administrator scopes are needed. Your Jira account must have Browse Projects and Work on Issues permissions for the target issue, and time tracking must be enabled. The write scope grants more than just work-log access, so protect the token accordingly.
 3. Open the existing `.env` locally in an editor:
 
-	```sh
-	code ~/Projects/jira-timesheet-calendar/.env
-	```
+   ```sh
+   code ~/Projects/jira-timesheet-calendar/.env
+   ```
 
 4. Set `JIRA_EMAIL` to your Atlassian account email and `JIRA_API_TOKEN` to the token. For a **scoped token**, also set `JIRA_CLOUD_ID` to your site's cloud ID. For this site the login redirect identified `8e3cd3a8-f987-45c6-96ba-44e0296173fa`; verify it at https://paragon-automation.atlassian.net/_edge/tenant_info if needed. For an **unscoped token**, leave `JIRA_CLOUD_ID` empty.
 5. Restart the server. Turn off **Sample data**, then refresh the calendar.
@@ -48,12 +48,15 @@ For a fresh checkout, create a local `.env` with the settings above and restrict
 ## Calendar and Totals
 
 - Month, week, and agenda views; Monday-start weeks.
+- Use the moon/sun button to switch between light and dark mode. The choice is saved in this browser; on the first visit it follows the system setting.
 - Choose a date or work log to see its issue, description, start time, and duration. Real issue links open Jira in a new tab.
+- Daily details also show the issue's current original estimate and due date, or indicate when they are unset or unavailable. The original estimate is displayed in hours and does not change logged-work totals.
+- Daily details show story points when Jira exposes a numeric custom field named **Story Points** or **Story point estimate**. They are the issue's current estimate, not points earned on that date; repeated logs repeat the same estimate. Unset or unavailable values and conflicting populated fields are flagged. Renamed fields are not detected.
 - Daily and period totals use exact logged seconds; displayed hours are rounded to two decimals.
 - Daily average uses days with work logs, not scheduled working days. Partial weekly totals include only days inside the displayed period.
 - Work logs are filtered and grouped by their `started` date in the local server's system time zone (your Mac's time zone), not your Jira profile time zone. For example, September 9 at 23:56 in Berlin appears on September 10 at 03:26 in India. The entire duration stays on its local start date; this is a timesheet, not a reconstructed activity timeline.
 - Today/navigation follows your browser's local date. The connection strip displays the reporting time zone.
-- CSV exports the displayed period with exact seconds as well as decimal hours. Spreadsheet-formula-like text is escaped.
+- CSV exports the displayed period with exact seconds, decimal hours, and story points. Spreadsheet-formula-like text is escaped.
 - Sample mode uses fabricated, labeled entries and does not access Jira. It is off by default and resets on reload.
 - No time is inferred from issue status, assignment, estimates, or commits. Hours must be logged in Jira, either directly or through this app's confirmed Log work action.
 
@@ -89,7 +92,7 @@ Update and delete reuse the expiring, server-held review and single-attempt prot
 
 ## Data Accuracy and Limits
 
-The backend identifies you with `GET /rest/api/3/myself`, discovers candidate issues using `POST /rest/api/3/search/jql`, then fetches paginated `GET /rest/api/3/issue/{id}/worklog` results. It filters each log by your account ID and the exact reporting dates. JQL date bounds are padded for time-zone differences; they are not used as the final inclusion check.
+The backend identifies you with `GET /rest/api/3/myself`, finds story-point fields using `GET /rest/api/3/field`, discovers candidate issues using `POST /rest/api/3/search/jql`, then fetches paginated `GET /rest/api/3/issue/{id}/worklog` results. It filters each log by your account ID and the exact reporting dates. JQL date bounds are padded for time-zone differences; they are not used as the final inclusion check.
 
 Search and work logs are both paginated, duplicate IDs are removed, and no partial totals are returned on failure. Up to three issue work-log requests run concurrently. Requests have timeouts; reports are limited to 62 days. A rate limit produces an explicit error rather than automatic repeated requests.
 
@@ -109,12 +112,14 @@ Jira search indexing can lag behind new or changed work logs. Refresh after a sh
 ```sh
 npm test
 npm run lint
+npm run format:check
 npm run build
 ```
 
 Tests cover pagination, author isolation, exclusive date boundaries, daylight-saving transitions, incomplete responses, local host/origin restrictions, CSRF and action confirmation, single-attempt writes, reviewed-payload integrity, concurrent-change locks, ownership and stale-entry checks, PUT/DELETE including 204 responses, precision and untouched-comment preservation, duration validation, aggregation, and safe CSV formatting. Mutation tests use mocks and never add, update, or delete real Jira entries. Live Jira mutation verification requires an intentional user-confirmed action and suitable permissions.
 
 Official references:
+
 - https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/
 - https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-worklogs/
 - https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/
