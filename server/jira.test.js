@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  getFieldOptions,
   getReport,
   makeRequest,
   validateRange,
@@ -300,6 +301,73 @@ test('reports issue story points including zero, missing and conflicting fields'
       timeZone: 'UTC',
     }),
     /invalid story point/,
+  );
+});
+
+test('loads Jira field options and returns only selected fields for issue details', async () => {
+  const fields = [
+    { id: 'customfield_10', name: 'Story Points' },
+    { id: 'customfield_20', name: 'Story point estimate' },
+    { id: 'customfield_30', name: 'Release' },
+    { id: 'customfield_40', name: 'Labels' },
+  ];
+  const selectedIssue = {
+    id: '100',
+    key: 'TEST-1',
+    fields: {
+      summary: 'Calendar report',
+      customfield_10: 3,
+      customfield_20: 3,
+      customfield_30: { name: 'Autumn' },
+      customfield_40: ['backend', { value: 'urgent' }],
+    },
+  };
+  const calls = [];
+  const request = async (path, body) => {
+    calls.push({ path, body });
+    if (path === 'myself') return user;
+    if (path === 'field') return fields;
+    if (path === 'search/jql') return { issues: [selectedIssue], isLast: true };
+    return {
+      startAt: 0,
+      total: 1,
+      worklogs: [worklog('1', '2026-09-10T12:00:00Z')],
+    };
+  };
+  const options = await getFieldOptions(request);
+  assert.ok(options.some((field) => field.id === 'customfield_30'));
+  const report = await getReport({
+    start: '2026-09-10',
+    end: '2026-09-11',
+    request,
+    selectedFieldIds: ['customfield_30', 'customfield_40'],
+    timeZone: 'UTC',
+  });
+  assert.deepEqual(report.selectedFieldIds, [
+    'customfield_30',
+    'customfield_40',
+  ]);
+  assert.deepEqual(report.entries[0].fieldValues, {
+    customfield_30: 'Autumn',
+    customfield_40: 'backend, urgent',
+  });
+  assert.ok(
+    calls.some(
+      ({ path, body }) =>
+        path === 'search/jql' &&
+        body.fields.includes('customfield_30') &&
+        body.fields.includes('customfield_40'),
+    ),
+  );
+  await assert.rejects(
+    getReport({
+      start: '2026-09-10',
+      end: '2026-09-11',
+      request,
+      selectedFieldIds: ['missingfield'],
+      timeZone: 'UTC',
+    }),
+    /Choose up to 50 fields/,
   );
 });
 

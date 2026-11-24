@@ -389,27 +389,118 @@ h1 {
 }
 .detail-settings fieldset {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: 1fr;
+  gap: 9px;
   border: 0;
   margin: 11px 0 0;
   padding: 0;
 }
 .detail-settings legend {
-  grid-column: 1 / -1;
   padding: 0 0 2px;
 }
-.detail-settings label {
+.detail-field-search {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+}
+.detail-field-picker {
+  position: relative;
+}
+.detail-field-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: grid;
+  gap: 2px;
+  max-height: 120px;
+  overflow: auto;
+  padding: 5px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px #162c2926;
+}
+.selected-field-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.selected-field-chips li {
+  max-width: 100%;
+}
+.selected-field-chips button {
   display: flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  background: var(--tint);
+  color: var(--ink);
+  font-size: 10px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.detail-field-list label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
   cursor: pointer;
 }
-.detail-settings input {
+.detail-field-list label:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.detail-field-list input {
   width: 14px;
   height: 14px;
   margin: 0;
+  flex: 0 0 auto;
   accent-color: var(--accent);
+}
+.detail-fields-empty,
+.detail-field-count {
+  font-size: 10px;
+  color: var(--muted);
+}
+.detail-fields-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  color: #9b3434;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  background: #fff0ef;
+  border-left: 3px solid #d99292;
+}
+.detail-field-count {
+  text-align: right;
+}
+.detail-field-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.detail-field-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 11px;
 }
 .day-entry {
   padding: 20px 0;
@@ -762,7 +853,8 @@ h1 {
   border-color: #829b91;
 }
 :root[data-theme='dark'] .error-strip,
-:root[data-theme='dark'] .form-error {
+:root[data-theme='dark'] .form-error,
+:root[data-theme='dark'] .detail-fields-error {
   background: var(--error-bg);
   color: var(--error-ink);
   border-color: #c28e89;
@@ -801,10 +893,14 @@ h1 {
   color: var(--accent);
 }
 :root[data-theme='dark'] .worklog-dialog input:not([type='checkbox']),
-:root[data-theme='dark'] .worklog-dialog textarea {
+:root[data-theme='dark'] .worklog-dialog textarea,
+:root[data-theme='dark'] .detail-field-search {
   background: var(--surface-input);
   color: var(--ink);
   border-color: #71847c;
+}
+:root[data-theme='dark'] .detail-field-list {
+  background: var(--surface-raised);
 }
 :root[data-theme='dark'] .worklog-dialog input[readonly],
 :root[data-theme='dark'] .worklog-dialog textarea[readonly] {

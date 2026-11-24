@@ -56,6 +56,31 @@ test('local API protects credentials, rejects other origins and unsupported writ
   }
 });
 
+test('serves Jira fields independently for the display-field picker', async () => {
+  let receivedRequest = false;
+  const server = createApp({
+    config: { email: 'test@example.com', token: 'test-only' },
+    fieldProvider: async (request) => {
+      receivedRequest = true;
+      assert.equal(typeof request, 'function');
+      return [{ id: 'customfield_10020', name: 'Release' }];
+    },
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const response = await fetch(`${base}/api/fields`);
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).fields, [
+      { id: 'customfield_10020', name: 'Release' },
+    ]);
+    assert.equal(receivedRequest, true);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('writes require same-origin CSRF, review and explicit confirmation; repeated saves write once', async () => {
   let reviewCalls = 0;
   let saveCalls = 0;

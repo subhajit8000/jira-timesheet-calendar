@@ -1,7 +1,18 @@
 import { DateTime } from 'luxon';
 import { createHash } from 'node:crypto';
+import {
+  defaultJiraFieldIds,
+  isJiraFieldId,
+  MAX_SELECTED_JIRA_FIELDS,
+} from '../shared/jira-fields.js';
 
 export const SITE = 'https://paragon-automation.atlassian.net';
+
+const fallbackFields = [
+  { id: 'timeoriginalestimate', name: 'Original estimate' },
+  { id: 'timespent', name: 'Time spent' },
+  { id: 'duedate', name: 'Due date' },
+];
 
 export class ReportError extends Error {
   constructor(message, status = 502) {
@@ -89,6 +100,57 @@ export function plainText(node) {
   );
 }
 
+export async function getFieldOptions(request, signal) {
+  const fields = await request('field', undefined, signal);
+  if (!Array.isArray(fields))
+    throw new ReportError('Jira returned an invalid field list.');
+  const options = new Map(fallbackFields.map((field) => [field.id, field]));
+  for (const field of fields) {
+    if (
+      field &&
+      isJiraFieldId(field.id) &&
+      typeof field.name === 'string' &&
+      field.name.trim()
+    ) {
+      options.set(field.id, { id: field.id, name: field.name.trim() });
+    }
+  }
+  return [...options.values()];
+}
+
+function displayFieldValue(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value === 'number' || typeof value === 'boolean')
+    return String(value);
+  if (Array.isArray(value)) {
+    const items = value.map(displayFieldValue).filter(Boolean);
+    return items.length ? items.join(', ') : null;
+  }
+  if (typeof value !== 'object') return null;
+  if (value.type === 'doc') return plainText(value).trim() || null;
+  for (const key of ['displayName', 'name', 'value', 'key', 'text']) {
+    if (
+      typeof value[key] === 'string' ||
+      typeof value[key] === 'number' ||
+      typeof value[key] === 'boolean'
+    ) {
+      return String(value[key]);
+    }
+  }
+  if (value.content) return plainText(value).trim() || null;
+  const parts = Object.entries(value)
+    .filter(
+      ([key]) => !['accountId', 'avatarUrls', 'iconUrl', 'self'].includes(key),
+    )
+    .map(([key, member]) => {
+      const label = displayFieldValue(member);
+      return label ? `${key}: ${label}` : null;
+    })
+    .filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
+}
+
 export function worklogVersion(log) {
   return createHash('sha256')
     .update(
@@ -110,22 +172,36 @@ export async function getReport({
   end,
   request,
   signal,
+  selectedFieldIds,
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
 }) {
   const { first, last } = validateRange(start, end);
   const user = await request('myself', undefined, signal);
   if (!user.accountId)
     throw new ReportError('Jira did not identify the current account.');
-  const fields = await request('field', undefined, signal);
-  if (!Array.isArray(fields))
-    throw new ReportError('Jira returned an invalid field list.');
-  const storyPointFields = fields
+  const availableFields = await getFieldOptions(request, signal);
+  const availableIds = new Set(availableFields.map((field) => field.id));
+  const storyPointFields = availableFields
     .filter(
       (field) =>
         /^customfield_\d+$/.test(field.id) &&
         /^(story points|story point estimate)$/i.test(field.name),
     )
     .map((field) => field.id);
+  const defaultFieldIds = defaultJiraFieldIds(availableFields);
+  const selectedIds = selectedFieldIds ?? defaultFieldIds;
+  if (
+    !Array.isArray(selectedIds) ||
+    selectedIds.length > MAX_SELECTED_JIRA_FIELDS ||
+    selectedIds.some((id) => !isJiraFieldId(id) || !availableIds.has(id)) ||
+    new Set(selectedIds).size !== selectedIds.length
+  ) {
+    throw new ReportError(
+      'Choose up to 50 fields from the Jira field list.',
+      400,
+    );
+  }
+  const requestedFieldIds = [...new Set([...selectedIds, ...storyPointFields])];
   const zone = timeZone;
   if (!DateTime.now().setZone(zone).isValid)
     throw new ReportError('The local reporting time zone is invalid.');
@@ -142,13 +218,7 @@ export async function getReport({
       'search/jql',
       {
         jql,
-        fields: [
-          'summary',
-          'timeoriginalestimate',
-          'timespent',
-          'duedate',
-          ...storyPointFields,
-        ],
+        fields: ['summary', ...requestedFieldIds],
         maxResults: 100,
         ...(nextPageToken ? { nextPageToken } : {}),
       },
@@ -188,10 +258,17 @@ export async function getReport({
         throw new ReportError('Jira returned an invalid story point value.');
       }
       const storyPointsConflict = new Set(points).size > 1;
-      const originalEstimateSeconds =
-        issue.fields?.timeoriginalestimate ?? null;
-      const timeSpentSeconds = issue.fields?.timespent ?? null;
-      const dueDate = issue.fields?.duedate ?? null;
+      const originalEstimateSeconds = selectedIds.includes(
+        'timeoriginalestimate',
+      )
+        ? (issue.fields?.timeoriginalestimate ?? null)
+        : null;
+      const timeSpentSeconds = selectedIds.includes('timespent')
+        ? (issue.fields?.timespent ?? null)
+        : null;
+      const dueDate = selectedIds.includes('duedate')
+        ? (issue.fields?.duedate ?? null)
+        : null;
       if (
         originalEstimateSeconds !== null &&
         (!Number.isSafeInteger(originalEstimateSeconds) ||
@@ -254,6 +331,14 @@ export async function getReport({
           const date = started.toISODate();
           if (date < start || date >= end) continue;
           const id = `${issue.id}:${log.id}`;
+          const fieldValues = Object.fromEntries(
+            selectedIds.map((fieldId) => [
+              fieldId,
+              storyPointsConflict && storyPointFields.includes(fieldId)
+                ? 'Multiple values in Jira'
+                : displayFieldValue(issue.fields?.[fieldId]),
+            ]),
+          );
           entries.set(id, {
             id,
             issueId: String(issue.id),
@@ -266,6 +351,7 @@ export async function getReport({
             originalEstimateSeconds,
             timeSpentSeconds,
             dueDate,
+            fieldValues,
             date,
             started: started.toISO(),
             seconds: log.timeSpentSeconds,
@@ -291,6 +377,9 @@ export async function getReport({
     end,
     fetchedAt: new Date().toISOString(),
     demo: false,
+    availableFields,
+    defaultFieldIds,
+    selectedFieldIds: selectedIds,
     entries: [...entries.values()].sort((before, after) =>
       before.started.localeCompare(after.started),
     ),

@@ -1,56 +1,67 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  defaultDetailFields,
+  clearDetailFields,
   readDetailFields,
   saveDetailFields,
 } from './detailFields.js';
 
-test('uses defaults and restores saved field visibility', () => {
+test('uses no saved selection by default and restores saved Jira field IDs', () => {
   let saved = null;
   const browser = {
     localStorage: {
       getItem: (key) => {
-        assert.equal(key, 'timesheet-detail-fields');
+        assert.equal(key, 'timesheet-selected-jira-fields');
         return saved;
       },
       setItem: (key, value) => {
-        assert.equal(key, 'timesheet-detail-fields');
+        assert.equal(key, 'timesheet-selected-jira-fields');
         saved = value;
+      },
+      removeItem: (key) => {
+        assert.equal(key, 'timesheet-selected-jira-fields');
+        saved = null;
       },
     },
   };
   assert.deepEqual(readDetailFields(browser), {
-    fields: defaultDetailFields,
+    fieldIds: null,
     storageError: false,
   });
-  const fields = { ...defaultDetailFields, storyPoints: false, dueDate: false };
-  assert.equal(saveDetailFields(browser, fields), true);
+  const fieldIds = ['duedate', 'customfield_10020'];
+  assert.equal(saveDetailFields(browser, fieldIds), true);
   assert.deepEqual(readDetailFields(browser), {
-    fields,
+    fieldIds,
     storageError: false,
   });
+  assert.equal(saveDetailFields(browser, []), true);
+  assert.deepEqual(readDetailFields(browser).fieldIds, []);
+  assert.equal(clearDetailFields(browser), true);
+  assert.deepEqual(readDetailFields(browser).fieldIds, null);
 });
 
-test('uses defaults and reports malformed or unavailable display settings', () => {
+test('reports malformed, excessive or unavailable display field settings', () => {
   const browser = {
     localStorage: { getItem: () => '{invalid' },
   };
   assert.deepEqual(readDetailFields(browser), {
-    fields: defaultDetailFields,
+    fieldIds: null,
     storageError: true,
   });
-  browser.localStorage.getItem = () => '{"storyPoints":"yes"}';
-  assert.deepEqual(readDetailFields(browser), {
-    fields: defaultDetailFields,
-    storageError: true,
-  });
+  browser.localStorage.getItem = () => '["not a field"]';
+  assert.equal(readDetailFields(browser).storageError, true);
   browser.localStorage.getItem = () => {
     throw new Error('Storage unavailable');
   };
   assert.deepEqual(readDetailFields(browser), {
-    fields: defaultDetailFields,
+    fieldIds: null,
     storageError: true,
   });
-  assert.equal(saveDetailFields(browser, defaultDetailFields), false);
+  assert.equal(saveDetailFields(browser, ['invalid id']), false);
+  assert.equal(
+    saveDetailFields(browser, Array(51).fill('customfield_1')),
+    false,
+  );
+  assert.equal(saveDetailFields(browser, ['9invalid']), false);
+  assert.equal(clearDetailFields(browser), false);
 });

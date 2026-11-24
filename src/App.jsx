@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import listPlugin from '@fullcalendar/list';
@@ -18,16 +18,18 @@ import {
   Plus,
   Pencil,
   Trash2,
+  X,
   Moon,
   Sun,
 } from 'lucide-react';
 import { formatHours, summarize, toCsv } from './report';
 import { readTheme, saveTheme } from './theme';
 import {
-  defaultDetailFields,
+  clearDetailFields,
   readDetailFields,
   saveDetailFields,
 } from './detailFields';
+import { MAX_SELECTED_JIRA_FIELDS } from '../shared/jira-fields';
 import LogWorkDialog from './LogWorkDialog';
 import './App.css';
 
@@ -37,43 +39,24 @@ const views = [
   ['listMonth', 'Agenda'],
 ];
 const dateKey = (date) => DateTime.fromJSDate(date).toISODate();
-const storyPointsLabel = (entry) =>
-  entry.storyPointsConflict
-    ? 'Multiple values in Jira'
-    : (entry.storyPoints ?? 'Not available');
-const detailFieldOptions = [
-  {
-    key: 'storyPoints',
-    label: 'Story points',
-    value: storyPointsLabel,
-  },
-  {
-    key: 'originalEstimate',
-    label: 'Original estimate',
-    value: (entry) =>
-      entry.originalEstimateSeconds != null
-        ? formatHours(entry.originalEstimateSeconds)
-        : 'Not available',
-  },
-  {
-    key: 'timeSpent',
-    label: 'Time spent',
-    value: (entry) =>
-      entry.timeSpentSeconds != null
-        ? formatHours(entry.timeSpentSeconds)
-        : 'Not available',
-  },
-  {
-    key: 'dueDate',
-    label: 'Due date',
-    value: (entry) =>
-      entry.dueDate
-        ? DateTime.fromISO(entry.dueDate, { zone: 'UTC' }).toFormat(
-            'd LLL yyyy',
-          )
-        : 'Not available',
-  },
-];
+function detailFieldValue(entry, field) {
+  const value = entry.fieldValues?.[field.id];
+  if (value == null || value === '') return 'Not available';
+  if (
+    ['timeoriginalestimate', 'timespent'].includes(field.id) &&
+    /^\d+$/.test(value)
+  ) {
+    return formatHours(Number(value));
+  }
+  if (
+    field.id === 'duedate' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    DateTime.fromISO(value, { zone: 'UTC' }).isValid
+  ) {
+    return DateTime.fromISO(value, { zone: 'UTC' }).toFormat('d LLL yyyy');
+  }
+  return value;
+}
 
 function IconButton({ label, children, ...props }) {
   return (
@@ -102,8 +85,19 @@ export default function App() {
   const [detailSettings, setDetailSettings] = useState(() =>
     readDetailFields(window),
   );
+  const [appliedFieldIds, setAppliedFieldIds] = useState(
+    () => detailSettings.fieldIds,
+  );
+  const [fieldOptions, setFieldOptions] = useState([]);
+  const [fieldSearch, setFieldSearch] = useState('');
+  const fieldSearchInput = useRef(null);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [fieldError, setFieldError] = useState('');
+  const fieldRequestInProgress = useRef(false);
   const start = period?.start;
   const end = period?.end;
+  const appliedFieldKey =
+    appliedFieldIds === null ? null : appliedFieldIds.join(',');
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeSettings.theme;
@@ -132,6 +126,7 @@ export default function App() {
           end,
           demo: demo ? '1' : '0',
         });
+        if (appliedFieldKey !== null) query.set('fields', appliedFieldKey);
         const response = await fetch(`/api/report?${query}`, {
           signal: controller.signal,
         });
@@ -139,6 +134,8 @@ export default function App() {
         if (!response.ok)
           throw new Error(result.error || 'Unable to load your work logs.');
         if (!controller.signal.aborted) {
+          setFieldOptions(result.availableFields || []);
+          setFieldError('');
           setReport(result);
           setPhase('ready');
         }
@@ -151,13 +148,35 @@ export default function App() {
     }
     load();
     return () => controller.abort();
-  }, [start, end, demo, refresh]);
+  }, [start, end, demo, refresh, appliedFieldKey]);
 
   const entries = report?.entries || [];
   const totals = summarize(entries);
   const selectedEntries = entries.filter(
     (entry) => entry.date === selectedDate,
   );
+  const selectedFieldIds =
+    detailSettings.fieldIds ?? report?.selectedFieldIds ?? [];
+  const displayedFieldIds = report?.selectedFieldIds ?? selectedFieldIds;
+  const selectedFields = selectedFieldIds.map(
+    (id) => fieldOptions.find((field) => field.id === id) ?? { id, name: id },
+  );
+  const visibleDetailFields = fieldOptions
+    .filter((field) => displayedFieldIds.includes(field.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const filteredFieldOptions = fieldOptions
+    .filter((field) =>
+      `${field.name} ${field.id}`
+        .toLowerCase()
+        .includes(fieldSearch.trim().toLowerCase()),
+    )
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const activeFieldIds = report?.selectedFieldIds ?? appliedFieldIds;
+  const fieldsChanged =
+    activeFieldIds !== null &&
+    (selectedFieldIds.length !== activeFieldIds.length ||
+      selectedFieldIds.some((fieldId) => !activeFieldIds.includes(fieldId)));
+  const canApplyFields = report || appliedFieldIds !== null;
   const ready = phase === 'ready';
   const events = entries.map((entry) => ({
     id: entry.id,
@@ -206,12 +225,68 @@ export default function App() {
     setThemeSettings({ theme, storageError: !saveTheme(window, theme) });
   }
 
-  function toggleDetailField(key, visible) {
-    const fields = { ...detailSettings.fields, [key]: visible };
+  function toggleDetailField(fieldId, visible) {
+    const next = new Set(selectedFieldIds);
+    if (visible) {
+      if (next.size >= MAX_SELECTED_JIRA_FIELDS) return;
+      next.add(fieldId);
+    } else {
+      next.delete(fieldId);
+    }
+    setDetailSettings((current) => ({
+      ...current,
+      fieldIds: [...next].sort(),
+    }));
+  }
+
+  function applyDetailFields() {
+    const fieldIds =
+      detailSettings.fieldIds ??
+      report?.selectedFieldIds ??
+      appliedFieldIds ??
+      [];
     setDetailSettings({
-      fields,
-      storageError: !saveDetailFields(window, fields),
+      fieldIds,
+      storageError: !saveDetailFields(window, fieldIds),
     });
+    setAppliedFieldIds(fieldIds);
+  }
+
+  function resetDetailFields() {
+    if (report) {
+      setDetailSettings((current) => ({
+        ...current,
+        fieldIds: report.defaultFieldIds,
+      }));
+    } else {
+      setDetailSettings({
+        fieldIds: null,
+        storageError: !clearDetailFields(window),
+      });
+      setAppliedFieldIds(null);
+    }
+  }
+
+  async function fetchFieldOptions() {
+    if (fieldRequestInProgress.current) return;
+    fieldRequestInProgress.current = true;
+    setFieldsLoading(true);
+    setFieldError('');
+    try {
+      const query = new URLSearchParams({ demo: demo ? '1' : '0' });
+      const response = await fetch(`/api/fields?${query}`);
+      const result = await response.json();
+      if (!response.ok)
+        throw new Error(result.error || 'Unable to load Jira fields.');
+      if (!Array.isArray(result.fields))
+        throw new Error('Jira returned an invalid field list.');
+      setFieldOptions(result.fields || []);
+    } catch (failure) {
+      setFieldError(failure.message);
+    } finally {
+      fieldRequestInProgress.current = false;
+      setFieldsLoading(false);
+    }
   }
 
   return (
@@ -512,24 +587,129 @@ export default function App() {
                 {ready ? formatHours(totals.days[selectedDate] || 0) : '--'}
               </strong>
             </div>
-            <details className="detail-settings">
+            <details
+              className="detail-settings"
+              onToggle={(event) => {
+                if (event.currentTarget.open && !fieldOptions.length)
+                  fetchFieldOptions();
+              }}
+            >
               <summary>Display fields</summary>
               <fieldset>
-                <legend>Show in issue details</legend>
-                {detailFieldOptions.map(({ key, label }) => (
-                  <label key={key}>
-                    <input
-                      type="checkbox"
-                      checked={
-                        detailSettings.fields[key] ?? defaultDetailFields[key]
-                      }
-                      onChange={(event) =>
-                        toggleDetailField(key, event.target.checked)
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
+                <legend>
+                  Choose up to {MAX_SELECTED_JIRA_FIELDS} Jira fields
+                </legend>
+                <div className="detail-field-picker">
+                  <input
+                    ref={fieldSearchInput}
+                    className="detail-field-search"
+                    type="search"
+                    placeholder="Search to add fields"
+                    aria-label="Search Jira fields"
+                    aria-controls={
+                      fieldSearch.trim() ? 'jira-field-results' : undefined
+                    }
+                    value={fieldSearch}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setFieldSearch('');
+                    }}
+                    onChange={(event) => {
+                      setFieldSearch(event.target.value);
+                      if (!fieldOptions.length) fetchFieldOptions();
+                    }}
+                  />
+                  {fieldSearch.trim() && (
+                    <div className="detail-field-list" id="jira-field-results">
+                      {filteredFieldOptions.map((field) => {
+                        const checked = selectedFieldIds.includes(field.id);
+                        return (
+                          <label key={field.id} title={field.id}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={
+                                !checked &&
+                                selectedFieldIds.length >=
+                                  MAX_SELECTED_JIRA_FIELDS
+                              }
+                              onChange={(event) => {
+                                toggleDetailField(
+                                  field.id,
+                                  event.target.checked,
+                                );
+                                setFieldSearch('');
+                                fieldSearchInput.current?.focus();
+                              }}
+                            />
+                            <span>{field.name}</span>
+                          </label>
+                        );
+                      })}
+                      {!filteredFieldOptions.length && (
+                        <p className="detail-fields-empty" role="status">
+                          {fieldsLoading
+                            ? 'Loading Jira fields...'
+                            : 'No matching Jira fields.'}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <span id="selected-fields-label">Selected fields</span>
+                <ul
+                  className="selected-field-chips"
+                  aria-labelledby="selected-fields-label"
+                >
+                  {selectedFields.map((field) => (
+                    <li key={field.id}>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${field.name} (${field.id})`}
+                        title={`Remove ${field.name}`}
+                        onClick={() => toggleDetailField(field.id, false)}
+                      >
+                        <span>{field.name}</span>
+                        <X size={12} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {!selectedFields.length && (
+                  <p className="detail-fields-empty">No fields selected.</p>
+                )}
+                {fieldError && (
+                  <p className="detail-fields-error" role="alert">
+                    {fieldError}{' '}
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={fetchFieldOptions}
+                    >
+                      Retry
+                    </button>
+                  </p>
+                )}
+                <p className="detail-field-count">
+                  {selectedFieldIds.length}/{MAX_SELECTED_JIRA_FIELDS} selected
+                </p>
+                <div className="detail-field-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={!report && appliedFieldIds === null}
+                    onClick={resetDetailFields}
+                  >
+                    Defaults
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={!canApplyFields || !fieldsChanged}
+                    onClick={applyDetailFields}
+                  >
+                    Apply
+                  </button>
+                </div>
               </fieldset>
             </details>
             <div className="day-entries">
@@ -554,18 +734,14 @@ export default function App() {
                       <b>{formatHours(entry.seconds)}</b>
                     </div>
                     <h3>{entry.summary}</h3>
-                    {detailFieldOptions.some(
-                      ({ key }) => detailSettings.fields[key],
-                    ) && (
+                    {visibleDetailFields.length > 0 && (
                       <dl className="entry-details">
-                        {detailFieldOptions
-                          .filter(({ key }) => detailSettings.fields[key])
-                          .map(({ key, label, value }) => (
-                            <Fragment key={key}>
-                              <dt>{label}</dt>
-                              <dd>{value(entry)}</dd>
-                            </Fragment>
-                          ))}
+                        {visibleDetailFields.flatMap((field) => [
+                          <dt key={`${field.id}-label`}>{field.name}</dt>,
+                          <dd key={`${field.id}-value`}>
+                            {detailFieldValue(entry, field)}
+                          </dd>,
+                        ])}
                       </dl>
                     )}
                     <p>{entry.comment || 'No description'}</p>

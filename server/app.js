@@ -2,7 +2,13 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { DateTime } from 'luxon';
 import {
+  defaultJiraFieldIds,
+  isJiraFieldId,
+  MAX_SELECTED_JIRA_FIELDS,
+} from '../shared/jira-fields.js';
+import {
   getReport,
+  getFieldOptions,
   makeRequest,
   ReportError,
   SITE,
@@ -10,8 +16,38 @@ import {
 } from './jira.js';
 import { reviewWorklog, saveWorklog } from './worklog.js';
 
-function sampleReport(start, end) {
+const sampleFields = [
+  { id: 'customfield_10000', name: 'Story points' },
+  { id: 'timeoriginalestimate', name: 'Original estimate' },
+  { id: 'timespent', name: 'Time spent' },
+  { id: 'duedate', name: 'Due date' },
+];
+
+function parseSelectedFieldIds(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string')
+    throw new ReportError('Selected Jira fields are invalid.', 400);
+  const fieldIds = value ? value.split(',') : [];
+  if (
+    fieldIds.length > MAX_SELECTED_JIRA_FIELDS ||
+    fieldIds.some((id) => !isJiraFieldId(id)) ||
+    new Set(fieldIds).size !== fieldIds.length
+  ) {
+    throw new ReportError('Choose up to 50 valid Jira fields.', 400);
+  }
+  return fieldIds;
+}
+
+function sampleReport(start, end, selectedFieldIds) {
   const { first, last } = validateRange(start, end);
+  const defaultFieldIds = defaultJiraFieldIds(sampleFields);
+  const selectedIds = selectedFieldIds ?? defaultFieldIds;
+  const availableFields = [
+    ...sampleFields,
+    ...selectedIds
+      .filter((id) => !sampleFields.some((field) => field.id === id))
+      .map((id) => ({ id, name: id })),
+  ];
   const entries = [];
   const tasks = [
     'Calendar integration',
@@ -23,7 +59,7 @@ function sampleReport(start, end) {
     if (date.weekday > 5 || date.day % 7 === 0) continue;
     for (let entryIndex = 0; entryIndex < 2; entryIndex += 1) {
       const taskIndex = (date.day + entryIndex) % tasks.length;
-      entries.push({
+      const entry = {
         id: `sample-${date.toISODate()}-${entryIndex}`,
         issueKey: `SAMPLE-${101 + taskIndex}`,
         summary: tasks[taskIndex],
@@ -37,6 +73,21 @@ function sampleReport(start, end) {
         seconds: (entryIndex ? 2.5 : 4) * 3600,
         comment: 'Sample entry',
         url: null,
+      };
+      const values = {
+        customfield_10000: entry.storyPoints,
+        timeoriginalestimate: entry.originalEstimateSeconds,
+        timespent: entry.timeSpentSeconds,
+        duedate: entry.dueDate,
+      };
+      entries.push({
+        ...entry,
+        fieldValues: Object.fromEntries(
+          selectedIds.map((id) => [
+            id,
+            values[id] == null ? null : String(values[id]),
+          ]),
+        ),
       });
     }
   }
@@ -45,6 +96,9 @@ function sampleReport(start, end) {
     end,
     entries,
     demo: true,
+    availableFields,
+    defaultFieldIds,
+    selectedFieldIds: selectedIds,
     fetchedAt: new Date().toISOString(),
     user: { name: 'Sample account', timeZone: 'UTC' },
   };
@@ -53,6 +107,7 @@ function sampleReport(start, end) {
 export function createApp({
   config = {},
   reportProvider = getReport,
+  fieldProvider = getFieldOptions,
   reviewProvider = reviewWorklog,
   saveProvider = saveWorklog,
 } = {}) {
@@ -206,8 +261,39 @@ export function createApp({
     if (!res.destroyed) res.status(result.status).json(result.body);
   });
   let activeRequests = 0;
+  app.get('/api/fields', async (req, res) => {
+    const abort = new AbortController();
+    res.on('close', () => abort.abort());
+    let counted = false;
+    try {
+      if (req.query.demo === '1') return res.json({ fields: sampleFields });
+      if (activeRequests >= 2)
+        throw new ReportError(
+          'A Jira request is already loading. Try again shortly.',
+          429,
+        );
+      activeRequests += 1;
+      counted = true;
+      const fields = await fieldProvider(
+        makeRequest(config),
+        AbortSignal.any([abort.signal, AbortSignal.timeout(30000)]),
+      );
+      if (!res.destroyed) res.json({ fields });
+    } catch (error) {
+      abort.abort();
+      if (!res.destroyed)
+        res.status(error instanceof ReportError ? error.status : 502).json({
+          error:
+            error instanceof ReportError
+              ? error.message
+              : 'Jira fields could not be loaded. Try again.',
+        });
+    } finally {
+      if (counted) activeRequests -= 1;
+    }
+  });
   app.get('/api/report', async (req, res) => {
-    const { start, end, demo } = req.query;
+    const { start, end, demo, fields } = req.query;
     const abort = new AbortController();
     res.on('close', () => abort.abort());
     let counted = false;
@@ -215,7 +301,9 @@ export function createApp({
       if (typeof start !== 'string' || typeof end !== 'string')
         throw new ReportError('Start and end dates are required.', 400);
       validateRange(start, end);
-      if (demo === '1') return res.json(sampleReport(start, end));
+      const selectedFieldIds = parseSelectedFieldIds(fields);
+      if (demo === '1')
+        return res.json(sampleReport(start, end, selectedFieldIds));
       if (activeRequests >= 2)
         throw new ReportError(
           'A report is already loading. Try again shortly.',
@@ -228,6 +316,7 @@ export function createApp({
         end,
         request: makeRequest(config),
         signal: AbortSignal.any([abort.signal, AbortSignal.timeout(120000)]),
+        selectedFieldIds,
       });
       if (!res.destroyed) res.json(report);
     } catch (error) {

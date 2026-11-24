@@ -1,41 +1,48 @@
-export const defaultDetailFields = {
-  storyPoints: true,
-  originalEstimate: true,
-  timeSpent: true,
-  dueDate: true,
-};
+import {
+  isJiraFieldId,
+  MAX_SELECTED_JIRA_FIELDS,
+} from '../shared/jira-fields.js';
 
-const storageKey = 'timesheet-detail-fields';
+const storageKey = 'timesheet-selected-jira-fields';
 
-function normalizeFields(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const fields = { ...defaultDetailFields };
-  for (const key of Object.keys(defaultDetailFields)) {
-    if (key in value) {
-      if (typeof value[key] !== 'boolean') return null;
-      fields[key] = value[key];
-    }
+function normalizeFieldIds(value) {
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_SELECTED_JIRA_FIELDS ||
+    !value.every(isJiraFieldId) ||
+    new Set(value).size !== value.length
+  ) {
+    return null;
   }
-  return fields;
+  return value;
 }
 
 export function readDetailFields(browser) {
   try {
     const saved = browser.localStorage.getItem(storageKey);
-    if (saved === null)
-      return { fields: { ...defaultDetailFields }, storageError: false };
-    const fields = normalizeFields(JSON.parse(saved));
-    return fields
-      ? { fields, storageError: false }
-      : { fields: { ...defaultDetailFields }, storageError: true };
+    if (saved === null) return { fieldIds: null, storageError: false };
+    const fieldIds = normalizeFieldIds(JSON.parse(saved));
+    return fieldIds
+      ? { fieldIds, storageError: false }
+      : { fieldIds: null, storageError: true };
   } catch {
-    return { fields: { ...defaultDetailFields }, storageError: true };
+    return { fieldIds: null, storageError: true };
   }
 }
 
-export function saveDetailFields(browser, fields) {
+export function saveDetailFields(browser, fieldIds) {
+  if (normalizeFieldIds(fieldIds) === null) return false;
   try {
-    browser.localStorage.setItem(storageKey, JSON.stringify(fields));
+    browser.localStorage.setItem(storageKey, JSON.stringify(fieldIds));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearDetailFields(browser) {
+  try {
+    browser.localStorage.removeItem(storageKey);
     return true;
   } catch {
     return false;
