@@ -30,6 +30,7 @@ function sampleReport(start, end) {
         storyPoints: [3, 5, null, 0][taskIndex],
         storyPointsConflict: false,
         originalEstimateSeconds: [28800, 14400, null, 0][taskIndex],
+        timeSpentSeconds: [43200, 36000, null, 0][taskIndex],
         dueDate: taskIndex === 2 ? null : first.endOf('month').toISODate(),
         date: date.toISODate(),
         started: date.set({ hour: 9 + entryIndex * 4 }).toISO(),

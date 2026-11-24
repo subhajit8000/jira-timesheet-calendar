@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import listPlugin from '@fullcalendar/list';
@@ -23,6 +23,11 @@ import {
 } from 'lucide-react';
 import { formatHours, summarize, toCsv } from './report';
 import { readTheme, saveTheme } from './theme';
+import {
+  defaultDetailFields,
+  readDetailFields,
+  saveDetailFields,
+} from './detailFields';
 import LogWorkDialog from './LogWorkDialog';
 import './App.css';
 
@@ -36,6 +41,39 @@ const storyPointsLabel = (entry) =>
   entry.storyPointsConflict
     ? 'Multiple values in Jira'
     : (entry.storyPoints ?? 'Not available');
+const detailFieldOptions = [
+  {
+    key: 'storyPoints',
+    label: 'Story points',
+    value: storyPointsLabel,
+  },
+  {
+    key: 'originalEstimate',
+    label: 'Original estimate',
+    value: (entry) =>
+      entry.originalEstimateSeconds != null
+        ? formatHours(entry.originalEstimateSeconds)
+        : 'Not available',
+  },
+  {
+    key: 'timeSpent',
+    label: 'Time spent',
+    value: (entry) =>
+      entry.timeSpentSeconds != null
+        ? formatHours(entry.timeSpentSeconds)
+        : 'Not available',
+  },
+  {
+    key: 'dueDate',
+    label: 'Due date',
+    value: (entry) =>
+      entry.dueDate
+        ? DateTime.fromISO(entry.dueDate, { zone: 'UTC' }).toFormat(
+            'd LLL yyyy',
+          )
+        : 'Not available',
+  },
+];
 
 function IconButton({ label, children, ...props }) {
   return (
@@ -61,6 +99,9 @@ export default function App() {
   const [logForm, setLogForm] = useState(null);
   const [savedNotice, setSavedNotice] = useState('');
   const [themeSettings, setThemeSettings] = useState(() => readTheme(window));
+  const [detailSettings, setDetailSettings] = useState(() =>
+    readDetailFields(window),
+  );
   const start = period?.start;
   const end = period?.end;
 
@@ -163,6 +204,14 @@ export default function App() {
   function toggleTheme() {
     const theme = themeSettings.theme === 'dark' ? 'light' : 'dark';
     setThemeSettings({ theme, storageError: !saveTheme(window, theme) });
+  }
+
+  function toggleDetailField(key, visible) {
+    const fields = { ...detailSettings.fields, [key]: visible };
+    setDetailSettings({
+      fields,
+      storageError: !saveDetailFields(window, fields),
+    });
   }
 
   return (
@@ -279,6 +328,11 @@ export default function App() {
         {themeSettings.storageError && (
           <p className="theme-notice" role="status">
             Theme preference could not be saved in this browser.
+          </p>
+        )}
+        {detailSettings.storageError && (
+          <p className="theme-notice" role="status">
+            Display field preferences could not be saved in this browser.
           </p>
         )}
         {savedNotice && (
@@ -458,6 +512,26 @@ export default function App() {
                 {ready ? formatHours(totals.days[selectedDate] || 0) : '--'}
               </strong>
             </div>
+            <details className="detail-settings">
+              <summary>Display fields</summary>
+              <fieldset>
+                <legend>Show in issue details</legend>
+                {detailFieldOptions.map(({ key, label }) => (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      checked={
+                        detailSettings.fields[key] ?? defaultDetailFields[key]
+                      }
+                      onChange={(event) =>
+                        toggleDetailField(key, event.target.checked)
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+            </details>
             <div className="day-entries">
               {!selectedEntries.length ? (
                 <p className="empty-day">
@@ -480,24 +554,20 @@ export default function App() {
                       <b>{formatHours(entry.seconds)}</b>
                     </div>
                     <h3>{entry.summary}</h3>
-                    <dl className="entry-details">
-                      <dt>Story points</dt>
-                      <dd>{storyPointsLabel(entry)}</dd>
-                      <dt>Original estimate</dt>
-                      <dd>
-                        {entry.originalEstimateSeconds != null
-                          ? formatHours(entry.originalEstimateSeconds)
-                          : 'Not available'}
-                      </dd>
-                      <dt>Due date</dt>
-                      <dd>
-                        {entry.dueDate
-                          ? DateTime.fromISO(entry.dueDate, {
-                              zone: 'UTC',
-                            }).toFormat('d LLL yyyy')
-                          : 'Not available'}
-                      </dd>
-                    </dl>
+                    {detailFieldOptions.some(
+                      ({ key }) => detailSettings.fields[key],
+                    ) && (
+                      <dl className="entry-details">
+                        {detailFieldOptions
+                          .filter(({ key }) => detailSettings.fields[key])
+                          .map(({ key, label, value }) => (
+                            <Fragment key={key}>
+                              <dt>{label}</dt>
+                              <dd>{value(entry)}</dd>
+                            </Fragment>
+                          ))}
+                      </dl>
+                    )}
                     <p>{entry.comment || 'No description'}</p>
                     <time dateTime={entry.started}>
                       {DateTime.fromISO(entry.started, {

@@ -376,6 +376,41 @@ h1 {
   color: var(--accent);
   grid-column: 1 / -1;
 }
+.detail-settings {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.detail-settings summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 500;
+}
+.detail-settings fieldset {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border: 0;
+  margin: 11px 0 0;
+  padding: 0;
+}
+.detail-settings legend {
+  grid-column: 1 / -1;
+  padding: 0 0 2px;
+}
+.detail-settings label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.detail-settings input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
 .day-entry {
   padding: 20px 0;
   border-bottom: 1px solid var(--line);

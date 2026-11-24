@@ -260,6 +260,7 @@ test('reports issue story points including zero, missing and conflicting fields'
       assert.deepEqual(body.fields, [
         'summary',
         'timeoriginalestimate',
+        'timespent',
         'duedate',
         'customfield_10',
         'customfield_20',
@@ -302,17 +303,21 @@ test('reports issue story points including zero, missing and conflicting fields'
   );
 });
 
-test('reports issue original estimates and due dates, including unset and zero values', async () => {
+test('reports issue estimates, time spent and due dates, including unset and zero values', async () => {
   const issues = [
     {
       id: '1',
       key: 'TEST-1',
-      fields: { timeoriginalestimate: 5400, duedate: '2026-09-20' },
+      fields: {
+        timeoriginalestimate: 5400,
+        timespent: 7200,
+        duedate: '2026-09-20',
+      },
     },
     {
       id: '2',
       key: 'TEST-2',
-      fields: { timeoriginalestimate: 0, duedate: null },
+      fields: { timeoriginalestimate: 0, timespent: 0, duedate: null },
     },
     { id: '3', key: 'TEST-3', fields: {} },
   ];
@@ -336,14 +341,18 @@ test('reports issue original estimates and due dates, including unset and zero v
   assert.deepEqual(
     report.entries.map((entry) => [
       entry.originalEstimateSeconds,
+      entry.timeSpentSeconds,
       entry.dueDate,
     ]),
     [
-      [5400, '2026-09-20'],
-      [0, null],
-      [null, null],
+      [5400, 7200, '2026-09-20'],
+      [0, 0, null],
+      [null, null, null],
     ],
   );
+  issues[0].fields.timespent = -1;
+  await assert.rejects(getReport(options), /invalid time spent/);
+  issues[0].fields.timespent = 7200;
   issues[0].fields.timeoriginalestimate = -1;
   await assert.rejects(getReport(options), /invalid original estimate/);
   issues[0].fields.timeoriginalestimate = 5400;

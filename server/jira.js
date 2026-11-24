@@ -145,6 +145,7 @@ export async function getReport({
         fields: [
           'summary',
           'timeoriginalestimate',
+          'timespent',
           'duedate',
           ...storyPointFields,
         ],
@@ -189,6 +190,7 @@ export async function getReport({
       const storyPointsConflict = new Set(points).size > 1;
       const originalEstimateSeconds =
         issue.fields?.timeoriginalestimate ?? null;
+      const timeSpentSeconds = issue.fields?.timespent ?? null;
       const dueDate = issue.fields?.duedate ?? null;
       if (
         originalEstimateSeconds !== null &&
@@ -196,6 +198,12 @@ export async function getReport({
           originalEstimateSeconds < 0)
       ) {
         throw new ReportError('Jira returned an invalid original estimate.');
+      }
+      if (
+        timeSpentSeconds !== null &&
+        (!Number.isSafeInteger(timeSpentSeconds) || timeSpentSeconds < 0)
+      ) {
+        throw new ReportError('Jira returned an invalid time spent value.');
       }
       if (
         dueDate !== null &&
@@ -256,6 +264,7 @@ export async function getReport({
             storyPoints: storyPointsConflict ? null : (points[0] ?? null),
             storyPointsConflict,
             originalEstimateSeconds,
+            timeSpentSeconds,
             dueDate,
             date,
             started: started.toISO(),

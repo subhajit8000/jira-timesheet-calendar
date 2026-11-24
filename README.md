@@ -50,8 +50,9 @@ For a fresh checkout, create a local `.env` with the settings above and restrict
 - Month, week, and agenda views; Monday-start weeks.
 - Use the moon/sun button to switch between light and dark mode. The choice is saved in this browser; on the first visit it follows the system setting.
 - Choose a date or work log to see its issue, description, start time, and duration. Real issue links open Jira in a new tab.
-- Daily details also show the issue's current original estimate and due date, or indicate when they are unset or unavailable. The original estimate is displayed in hours and does not change logged-work totals.
+- Daily details also show the issue's current original estimate, total time spent, and due date, or indicate when they are unset or unavailable. Estimate and time spent are displayed in hours; issue time spent may include work logged by other users and is separate from this account's report totals.
 - Daily details show story points when Jira exposes a numeric custom field named **Story Points** or **Story point estimate**. They are the issue's current estimate, not points earned on that date; repeated logs repeat the same estimate. Unset or unavailable values and conflicting populated fields are flagged. Renamed fields are not detected.
+- Use **Display fields** in the right-side panel to show or hide story points, original estimate, time spent, and due date. Your choices are saved in this browser.
 - Daily and period totals use exact logged seconds; displayed hours are rounded to two decimals.
 - Daily average uses days with work logs, not scheduled working days. Partial weekly totals include only days inside the displayed period.
 - Work logs are filtered and grouped by their `started` date in the local server's system time zone (your Mac's time zone), not your Jira profile time zone. For example, September 9 at 23:56 in Berlin appears on September 10 at 03:26 in India. The entire duration stays on its local start date; this is a timesheet, not a reconstructed activity timeline.
